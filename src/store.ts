@@ -49,15 +49,23 @@ export interface Note {
     updated: number;
 }
 
+export type EntryMap = { [group: string]: Entry[] };
+export type SubjectMap = { [group: string]: Subject[] };
+
+export interface SemesterData {
+    entries: EntryMap;
+    subjects: SubjectMap;
+}
+
 export interface State {
     group: string;
     date: Date;
-    entries: {
-        [key: string]: Entry[];
+    data: {
+        [id: string]: SemesterData;
     };
-    subjects: {
-        [key: string]: Subject[];
-    };
+    readyIds: string[];
+    recent: string[];
+    loading: boolean;
     semesters: Semester[];
     periods: Period[];
     now: Date;
@@ -66,7 +74,6 @@ export interface State {
     search: string;
     searchType: string;
     subSearch: Entry | undefined;
-    year: string;
     canSync: boolean;
     settings: {
         group: string;
@@ -91,14 +98,143 @@ export interface State {
         hash: string;
     }[];
     msg?: ReturnType<typeof useMessage>;
+    loadingBar?: ReturnType<typeof useLoadingBar>;
+}
+
+const DATA_PATH = '/data';
+const SEMESTERS_URL = `${DATA_PATH}/semesters.json`;
+const DATA_CACHE = 'watplan-data-v1';
+const LEGACY_CACHE = 'data';
+const MAX_CACHED_FILES = 8;
+const MAX_LOADED_SEMESTERS = 3;
+const REVALIDATE_TTL = 5 * 60 * 1000;
+
+const lastCheck = new Map<string, number>();
+var pending: { key: string, promise: Promise<void> } | null = null;
+
+function parseDay(day: string, endOfDay = false) {
+    return new Date(`${day}T${endOfDay ? '23:59:59' : '00:00:00'}`);
+}
+
+function entriesUrl(id: string) {
+    return `${DATA_PATH}/entries-${id}.json`;
+}
+
+function subjectsUrl(id: string) {
+    return `${DATA_PATH}/subjects-${id}.json`;
+}
+
+async function openDataCache() {
+    if (typeof caches === 'undefined')
+        return undefined;
+    try {
+        return await caches.open(DATA_CACHE);
+    } catch (err) {
+        console.error(err);
+        return undefined;
+    }
+}
+
+function cacheOrder(): string[] {
+    try {
+        return JSON.parse(localStorage.getItem('dataCache') ?? '[]');
+    } catch {
+        return [];
+    }
+}
+
+function touchCached(url: string) {
+    const order = [url, ...cacheOrder().filter(u => u !== url)];
+    localStorage.setItem('dataCache', JSON.stringify(order));
+}
+
+async function trimCache(cache: Cache) {
+    const keep = cacheOrder().slice(0, MAX_CACHED_FILES);
+    localStorage.setItem('dataCache', JSON.stringify(keep));
+    for (const req of await cache.keys()) {
+        const path = new URL(req.url).pathname;
+        if (path !== SEMESTERS_URL && !keep.includes(path))
+            await cache.delete(req);
+    }
+}
+
+async function loadJSON(url: string) {
+    const cache = await openDataCache();
+    const cached = await cache?.match(url);
+    if (cached !== undefined) {
+        touchCached(url);
+        return cached.json();
+    }
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok)
+        throw new Error(`${url}: ${res.status}`);
+    lastCheck.set(url, Date.now());
+    if (cache !== undefined) {
+        await cache.put(url, res.clone());
+        touchCached(url);
+        await trimCache(cache);
+    }
+    return res.json();
+}
+
+async function revalidateJSON(url: string, force = false) {
+    const cache = await openDataCache();
+    const cached = await cache?.match(url);
+    if (cache === undefined || cached === undefined)
+        return undefined;
+    if (!force && Date.now() - (lastCheck.get(url) ?? 0) < REVALIDATE_TTL)
+        return undefined;
+    const headers: HeadersInit = {};
+    const etag = cached.headers.get('etag');
+    const modified = cached.headers.get('last-modified');
+    if (etag !== null && etag !== '')
+        headers['If-None-Match'] = etag;
+    if (modified !== null)
+        headers['If-Modified-Since'] = modified;
+    if (Object.keys(headers).length === 0)
+        return undefined;
+    lastCheck.set(url, Date.now());
+    const res = await fetch(url, { cache: 'no-store', headers });
+    if (res.status === 304 || !res.ok)
+        return undefined;
+    await cache.put(url, res.clone());
+    touchCached(url);
+    return res.json();
+}
+
+async function loadSemester(id: string): Promise<SemesterData> {
+    const [entries, subjects] = await Promise.all([
+        loadJSON(entriesUrl(id)),
+        loadJSON(subjectsUrl(id))
+    ]);
+    return { entries: entries ?? {}, subjects: subjects ?? {} };
+}
+
+async function loadSemesters(): Promise<Semester[]> {
+    const cache = await openDataCache();
+    try {
+        const res = await fetch(SEMESTERS_URL, { cache: 'no-store' });
+        if (res.ok) {
+            await cache?.put(SEMESTERS_URL, res.clone());
+            return await res.json();
+        }
+    } catch (err) {
+        console.error(err);
+    }
+    const cached = await cache?.match(SEMESTERS_URL);
+    if (cached !== undefined)
+        return cached.json();
+    return [];
 }
 
 export default defineStore('store', {
     state: (): State => ({
         group: 'WCY22IY1S1',
         date: new Date(),
-        entries: {},
-        subjects: {},
+        data: {},
+        readyIds: [],
+        recent: [],
+        loading: false,
         periods: [
             { start: '08:00', end: '09:35' },
             { start: '09:50', end: '11:25' },
@@ -114,7 +250,6 @@ export default defineStore('store', {
         search: '',
         searchType: '',
         subSearch: undefined,
-        year: "2023",
         semesters: [],
         canSync: false,
         settings: {
@@ -133,33 +268,73 @@ export default defineStore('store', {
         transferred: []
     }),
     getters: {
-        groups: (state) => {
-            return Object.keys(state.entries).sort();
+        semesterIds: (state): string[] => {
+            if (state.semesters.length === 0)
+                return [];
+            const date = state.date.getTime();
+            const within = state.semesters.filter((s) => date >= parseDay(s.start).getTime() && date <= parseDay(s.end, true).getTime());
+            if (within.length > 0)
+                return within.map((s) => s.id);
+            const next = state.semesters
+                .filter((s) => parseDay(s.start).getTime() > date)
+                .sort((a, b) => parseDay(a.start).getTime() - parseDay(b.start).getTime())[0];
+            if (next !== undefined)
+                return [next.id];
+            const last = [...state.semesters].sort((a, b) => parseDay(a.end).getTime() - parseDay(b.end).getTime()).pop();
+            return last !== undefined ? [last.id] : [];
         },
-        groupsFiltered: (state): string[] => {
-            return Object.keys(state.entries).filter((group) => state.entries[group].some((entry) => {
-              const date = entry.date?.split('-') ?? ['0', '0', '0'];
-              return date[0] === ((parseInt(state.year) + 1).toString()) || (date[0] === state.year && parseInt(date[1]) > 9)
-            })).sort();
+        activeSemesters(): Semester[] {
+            return this.semesterIds
+                .map((id) => this.semesters.find((s) => s.id === id))
+                .filter((s) => s !== undefined) as Semester[];
         },
-        gEntries: (state) => {
-            return state.entries[state.group] ?? [];
+        entries(): EntryMap {
+            if (this.readyIds.length === 1)
+                return this.data[this.readyIds[0]]?.entries ?? {};
+            var res: EntryMap = {};
+            for (const id of this.readyIds) {
+                const sem = this.data[id];
+                if (sem === undefined) continue;
+                for (const group in sem.entries) {
+                    if (res[group] === undefined) res[group] = [];
+                    res[group].push(...sem.entries[group]);
+                }
+            }
+            for (const group in res)
+                res[group] = uniqBy(res[group], x => x.hash!);
+            return res;
         },
-        gSubjects: (state) => {
-            return state.subjects[state.group];
+        subjects(): SubjectMap {
+            if (this.readyIds.length === 1)
+                return this.data[this.readyIds[0]]?.subjects ?? {};
+            var res: SubjectMap = {};
+            for (const id of this.readyIds) {
+                const sem = this.data[id];
+                if (sem === undefined) continue;
+                for (const group in sem.subjects) {
+                    if (res[group] === undefined) res[group] = [];
+                    res[group].push(...sem.subjects[group]);
+                }
+            }
+            for (const group in res)
+                res[group] = uniqBy(res[group], x => (x.title! + x.short! + x.color! + x.type! + x.prof! + x.numH!));
+            return res;
         },
-        subTypes: (state): string[] => {
-            return Array.from(new Set(state.subjects[state.group].map((sub) => sub.type ?? '')));
+        year(): string {
+            const ids = this.readyIds.length > 0 ? this.readyIds : this.semesterIds;
+            return (ids[ids.length - 1] ?? '').slice(0, 4);
         },
-        dateSemester: (state) => {
-            return state.semesters.find((semester) => {
-                const start = new Date(semester.start);
-                const end = new Date(semester.end);
-                return state.date >= start && state.date <= end;
-            });
+        groups(): string[] {
+            return Object.keys(this.entries).sort();
         },
-        yearSemesters: (state) => {
-            return state.semesters.filter((semester) => semester.id.startsWith(state.year));
+        gEntries(): Entry[] {
+            return this.entries[this.group] ?? [];
+        },
+        gSubjects(): Subject[] {
+            return this.subjects[this.group] ?? [];
+        },
+        subTypes(): string[] {
+            return Array.from(new Set(this.gSubjects.map((sub) => sub.type ?? '')));
         },
         years: (state) => {
             return Array.from(new Set(state.semesters.map((semester) => semester.id.slice(0, 4))));
@@ -184,20 +359,13 @@ export default defineStore('store', {
         monthMode: (state) => {
             return state.mode === ViewMode.Month;
         },
-        transferredEntries: (state) => {
-            if (state.group !== state.settings.group) return [];
-            return (state.transferred?.map((t) => {
-                let ent = state.entries[t.group]?.find((e) => e.hash === t.hash);
+        transferredEntries(): Entry[] {
+            if (this.group !== this.settings.group) return [];
+            return (this.transferred?.map((t) => {
+                let ent = this.entries[t.group]?.find((e) => e.hash === t.hash);
                 if (ent !== undefined) ent.group = t.group;
                 return ent
             }).filter((e) => e !== undefined) ?? []) as Entry[];
-        },
-        currentYear: () => {
-          const now = new Date()
-          if (now.getMonth() < 9) {
-            return now.getFullYear() - 1
-          }
-          return now.getFullYear()
         }
     },
     actions: {
@@ -217,14 +385,13 @@ export default defineStore('store', {
         loadState() {
             if (localStorage.getItem('settings') === null)
                 return;
-            this.year = localStorage.getItem('year') ?? '2022';
             this.group = localStorage.getItem('group') ?? 'WCY22IY1S1';
             this.settings = merge(this.settings, JSON.parse(localStorage.getItem('settings') ?? '{}'));
             this.notes = JSON.parse(localStorage.getItem('notes') ?? '[]');
             this.transferred = JSON.parse(localStorage.getItem('transferred') ?? '[]');
+            localStorage.removeItem('year');
         },
         saveState(local = false) {
-            localStorage.setItem('year', this.year);
             localStorage.setItem('group', this.group);
             localStorage.setItem('settings', JSON.stringify(this.settings ?? {}));
             localStorage.setItem('notes', JSON.stringify(this.notes ?? []));
@@ -272,34 +439,107 @@ export default defineStore('store', {
                 console.error(err);
             });
         },
-        async refresh() {
-            for (let i = 0; i <= 1; i++) {
-                const get = i === 1 ? getFetch : getCache;
+        async init() {
+            if (typeof caches !== 'undefined')
+                caches.delete(LEGACY_CACHE).catch((err) => console.error(err));
+            const semesters = await loadSemesters();
+            this.semesters = [...semesters].sort((a, b) => a.id.localeCompare(b.id));
+            await this.ensureData();
+        },
+        ensureData(force = false) {
+            const ids = this.semesterIds;
+            const key = ids.join(',');
+            if (!force && pending !== null && pending.key === key)
+                return pending.promise;
+            const promise = this.loadScope(ids, force).finally(() => {
+                if (pending !== null && pending.promise === promise)
+                    pending = null;
+            });
+            pending = { key, promise };
+            return promise;
+        },
+        async loadScope(ids: string[], force = false) {
+            if (ids.length === 0)
+                return;
+            const missing = force ? ids : ids.filter((id) => this.data[id] === undefined);
+            if (missing.length > 0) {
+                this.loading = true;
+                this.loadingBar?.start();
                 try {
-                    var ent: State['entries'] = {};
-                    var sub: State['subjects'] = {};
-                    this.semesters = await get('/data/semesters.json').then((res) => (res?.json() ?? []));
-                    for (const semester of this.yearSemesters) {
-                        var entries: typeof ent = await get(`/data/entries-${semester.id}.json`).then((res) => (res?.json() ?? {}));
-                        for (const group in entries) {
-                            if (ent[group] === undefined) ent[group] = [];
-                            ent[group].push(...entries[group]);
-                            ent[group] = uniqBy(ent[group], x => x.hash!);
-                        }
-                        var subjects: typeof sub = await get(`/data/subjects-${semester.id}.json`).then((res) => (res?.json() ?? {}));
-                        for (const group in subjects) {
-                            if (sub[group] === undefined) sub[group] = [];
-                            sub[group].push(...subjects[group]);
-                            sub[group] = uniqBy(sub[group], x => (x.title! + x.short! + x.color! + x.type! + x.prof! + x.numH!));
-                        }
-                    }
-                    this.entries = ent;
-                    this.subjects = sub;
+                    const loaded = await Promise.all(missing.map(async (id) => [id, await loadSemester(id)] as const));
+                    loaded.forEach(([id, data]) => { this.data[id] = data; });
+                    this.loadingBar?.finish();
+                } catch (err) {
+                    console.error(err);
+                    this.loadingBar?.error();
+                    this.msg?.error('Nie udało się pobrać planu. Sprawdź połączenie.');
+                } finally {
+                    this.loading = false;
                 }
-                catch (err) {
+            }
+            const ready = ids.filter((id) => this.data[id] !== undefined);
+            if (ready.length === 0 && this.readyIds.length > 0)
+                return;
+            this.readyIds = ready;
+            this.recent = [...ready, ...this.recent.filter((id) => !ready.includes(id))];
+            this.prune();
+            this.checkUpdates(ready);
+        },
+        prune() {
+            const keep = this.recent.slice(0, MAX_LOADED_SEMESTERS);
+            for (const id in this.data) {
+                if (!keep.includes(id))
+                    delete this.data[id];
+            }
+            this.recent = keep;
+        },
+        async checkUpdates(ids: string[], force = false) {
+            var changed = false;
+            for (const id of ids) {
+                try {
+                    const [entries, subjects] = await Promise.all([
+                        revalidateJSON(entriesUrl(id), force),
+                        revalidateJSON(subjectsUrl(id), force)
+                    ]);
+                    if (entries === undefined && subjects === undefined)
+                        continue;
+                    this.data[id] = {
+                        entries: entries ?? this.data[id]?.entries ?? {},
+                        subjects: subjects ?? this.data[id]?.subjects ?? {}
+                    };
+                    changed = true;
+                } catch (err) {
                     console.error(err);
                 }
             }
+            return changed;
+        },
+        async refresh() {
+            this.loadingBar?.start();
+            try {
+                const semesters = await loadSemesters();
+                if (semesters.length > 0)
+                    this.semesters = [...semesters].sort((a, b) => a.id.localeCompare(b.id));
+                await this.ensureData();
+                const changed = await this.checkUpdates(this.readyIds, true);
+                this.loadingBar?.finish();
+                this.msg?.success(changed ? 'Plan został zaktualizowany.' : 'Plan jest aktualny.');
+            } catch (err) {
+                console.error(err);
+                this.loadingBar?.error();
+                this.msg?.error('Nie udało się odświeżyć planu.');
+            }
+        },
+        goToYear(year: string) {
+            const semesters = this.semesters
+                .filter((s) => s.id.startsWith(year))
+                .sort((a, b) => parseDay(a.start).getTime() - parseDay(b.start).getTime());
+            if (semesters.length === 0)
+                return;
+            const now = new Date();
+            const current = semesters.find((s) => now >= parseDay(s.start) && now <= parseDay(s.end, true));
+            this.date = current !== undefined ? now : parseDay(semesters[0].start);
+            this.month = startOfMonth(this.date);
         },
         subColor(sub: Subject) {
             if (this.settings.useCustomColors)
@@ -333,11 +573,3 @@ export default defineStore('store', {
         }
     }
 });
-
-function getFetch(url: string) {
-    return fetch(url, { cache: 'no-cache' });
-}
-
-function getCache(url: string) {
-    return caches.match(url);
-}

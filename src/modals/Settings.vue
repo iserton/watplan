@@ -10,7 +10,12 @@ const years = computed(() => store.yearsText.map(y => ({
   value: y.substring(0, 4),
   label: y
 })))
-const groups = computed(() => store.groupsFiltered.map(g => ({ label: g, value: g })))
+const year = computed({
+  get: () => store.year,
+  set: (value: string) => store.goToYear(value)
+})
+const semester = computed(() => store.activeSemesters.map(s => s.name).join(' / '))
+const groups = computed(() => store.groups.map(g => ({ label: g, value: g })))
 const emit = defineEmits<{
   (e: 'saved'): void
 }>()
@@ -66,17 +71,12 @@ function handleSync(key: string) {
 }
 
 const prevGroup = store.settings.group
-const prevYear = store.year
 const msg = useMessage();
 function saveclose() {
   store.saveState();
   if (prevGroup !== store.settings.group)
     store.group = store.settings.group;
-  if (prevYear !== store.year) {
-    msg.loading('Zapisano ustawienia. Odświeżanie...');
-    store.refresh();
-  } else
-    msg.success('Zapisano ustawienia.');
+  msg.success('Zapisano ustawienia.');
   showSettings.value = false;
 }
 
@@ -96,10 +96,14 @@ function showSchedule() {
       <n-form-item label="Wybierz swoją grupę">
         <n-select v-model:value="store.settings.group" :options="groups" filterable></n-select>
       </n-form-item>
-      <n-form-item class="mt-4" label="Wybierz rok">
-        <n-select v-model:value="store.year" :options="years"></n-select>
+      <n-form-item class="mt-4" label="Przejdź do roku">
+        <n-select v-model:value="year" :options="years"></n-select>
       </n-form-item>
-      <n-button text class="mt-2" @click="copyICS">Skopiuj link do kalendarza</n-button>
+      <n-p v-if="semester" class="my-0 text-sm"><n-text depth="3">Wyświetlany semestr: {{ semester }}</n-text></n-p>
+      <n-space class="mt-2" align="center">
+        <n-button text @click="copyICS">Skopiuj link do kalendarza</n-button>
+        <n-button text :disabled="store.loading" @click="store.refresh()">Odśwież plan</n-button>
+      </n-space>
       <n-space class="mt-4">
         <n-switch v-model:value="store.settings.hideWeekends"></n-switch>
         <n-p>Ukryj weekendy</n-p>

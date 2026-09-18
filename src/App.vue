@@ -9,6 +9,7 @@ import MonthView from './views/MonthView.vue';
 import SubSearch from './modals/SubSearch.vue';
 import Settings from './modals/Settings.vue';
 import ChangeId from './modals/ChangeId.vue';
+import Hooks from './components/Hooks.vue';
 import { CalendarMonthFilled, SettingsRound, SearchRound } from '@vicons/material';
 
 const store = useStore()
@@ -18,9 +19,6 @@ if (!store.settings.id || !store.checkID(store.settings.id)) {
   store.saveState();
 }
 store.pullSettings().then(() => {
-  if (store.year !== store.currentYear.toString()) {
-    store.year = store.currentYear.toString();
-  }
   if (store.settings.group === '')
     store.settings.group = store.group;
   store.group = store.settings.group;
@@ -54,7 +52,7 @@ watch(weekview, () => {
 
 const groupFilter = ref('');
 
-const groups = computed(() => store.groupsFiltered.map(g => ({ 
+const groups = computed(() => store.groups.map(g => ({
     label: g, 
     value: g,
     style: store.settings.group === g || store.settings.pinned.includes(g) ? 'font-weight: bold' : ''
@@ -65,11 +63,12 @@ const groups = computed(() => store.groupsFiltered.map(g => ({
     if (store.settings.pinned.includes(b.value) && !store.settings.pinned.includes(a.value)) return 1;
     return 0;
   }).filter(g => g.label.toLowerCase().includes(groupFilter.value.toLowerCase())));
-store.refresh().then(() => {
+watch(() => store.semesterIds.join(','), () => store.ensureData());
+store.init().then(() => {
   if (localStorage.getItem('migrated') !== '2') {
     store.notes.forEach(n => {
       if ((n as any).title !== undefined) {
-        n.hash = store.entries[n.group!].find(e => e.title === (n as any).title && e.type === (n as any).type && e.num === (n as any).num)?.hash ?? '';
+        n.hash = store.entries[n.group!]?.find(e => e.title === (n as any).title && e.type === (n as any).type && e.num === (n as any).num)?.hash ?? '';
         if (n.hash !== '') {
           delete (n as any).title;
           delete (n as any).type;
@@ -113,7 +112,9 @@ setInterval(() => {
 
 <template>
   <n-config-provider :theme="theme" :locale="plPL" :date-locale="datePlPL">
+    <n-loading-bar-provider>
     <n-message-provider>
+      <Hooks></Hooks>
       <n-layout class="h-screen max-h-screen min-h-screen">
         <n-layout-header class="sticky top-0 left-0 z-50">
           <n-space class="p-3" justify="space-between" align="center">
@@ -124,7 +125,7 @@ setInterval(() => {
               <n-button @contextmenu.prevent="pinGroup" text>Grupa: {{ store.group }}</n-button>
             </n-popselect>
             <n-space align="center">
-              <n-button v-if="store.mode === ViewMode.Month" quaternary circle size="small"
+              <n-button v-if="store.mode === ViewMode.Month && store.gSubjects.length > 0" quaternary circle size="small"
                 @click="store.search = store.gSubjects[0].title!">
                 <template #icon>
                   <n-icon>
@@ -180,6 +181,7 @@ setInterval(() => {
       </n-layout>
       <n-global-style></n-global-style>
     </n-message-provider>
+    </n-loading-bar-provider>
   </n-config-provider>
 </template>
 

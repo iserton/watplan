@@ -1,6 +1,6 @@
 # WATplan Server
 
-Serwer bez interfejsu graficznego. Co 15 minut pobiera pliki JSON z danymi wszystkich semestrów, generuje osobny plik ICS dla każdej grupy i semestru oraz zapisuje je lokalnie na 15 minut.
+Serwer z prostą stroną wyboru kalendarza. Co 15 minut pobiera pliki JSON z danymi wszystkich semestrów, generuje osobny plik ICS dla każdej grupy i semestru oraz zapisuje je lokalnie na 15 minut.
 
 ## Uruchomienie
 
@@ -14,8 +14,11 @@ Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić zmiennymi
 
 ## Endpointy
 
+- `GET /` — formularz wyboru grupy i semestru oraz kopiowania linku.
 - `GET /health` — status serwera w JSON.
 - `GET /api/schedule?group=WCY23IB4aS6&semester=20261` — plik ICS grupy dla semestru o ID `20261`.
+- `GET /api/schedule?group=ALL&semester=20261` — wspólny kalendarz dla wszystkich grup.
+- `GET /api/options` — listy grup i semestrów dla formularza.
 
 Identyfikatory i nazwy semestrów pochodzą z `semesters.json`. Przykładowo `20261` oznacza semestr zimowy roku akademickiego 2026/2027, a `20262` — letni.
 

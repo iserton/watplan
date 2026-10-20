@@ -276,15 +276,14 @@ function typeMarker(type) {
   })[type] ?? type ?? '';
 }
 
-function makeEvent(group, entry, subject) {
+function makeEvent(group, entry, subject, identity) {
   const start = eventDateTime(entry.date, entry.timeStart);
   const end = eventDateTime(entry.date, entry.timeEnd);
   if (!start || !end) return undefined;
 
-  const eventHash = entry.hash || createHash('sha256')
-    .update(`${start}|${entry.title ?? ''}|${entry.num ?? ''}`)
+  const uid = createHash('sha256')
+    .update(`${group}|${identity}`)
     .digest('hex');
-  const uid = `${group}-${eventHash}-${start}`;
   const description = [
     entry.title,
     `Rodzaj zajęć: ${entry.type ?? ''}`,
@@ -321,19 +320,30 @@ function eventIdentity(entry, subject) {
     entry.num !== undefined,
     entry.num ?? null,
     entry.num !== undefined ? subject?.numH ?? null : null,
-    entry.prof ?? subject?.prof ?? '',
     entry.room?.length ? entry.room.join(', ') : '',
   ]);
 }
 
 function makeCalendar(group, semester, entries, subjects) {
-  const seenEvents = new Set();
-  const events = entries.flatMap((entry) => {
+  const groupedEvents = new Map();
+  for (const entry of entries) {
     const subject = findSubject(subjects, entry);
     const identity = eventIdentity(entry, subject);
-    if (!identity || seenEvents.has(identity)) return [];
-    seenEvents.add(identity);
-    const event = makeEvent(group, entry, subject);
+    if (!identity) continue;
+    let grouped = groupedEvents.get(identity);
+    if (!grouped) {
+      grouped = { entry, subject, professors: new Set() };
+      groupedEvents.set(identity, grouped);
+    }
+    const professor = String(entry.prof ?? subject?.prof ?? '').trim().replace(/\s+/g, ' ');
+    if (professor) grouped.professors.add(professor);
+  }
+  const events = [...groupedEvents].flatMap(([identity, grouped]) => {
+    const entry = {
+      ...grouped.entry,
+      prof: [...grouped.professors].join(', ') || grouped.entry.prof,
+    };
+    const event = makeEvent(group, entry, grouped.subject, identity);
     return event ? [event] : [];
   });
   const header = [

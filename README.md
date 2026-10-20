@@ -4,13 +4,13 @@ Serwer z prostą stroną wyboru kalendarza. Co 15 minut pobiera pliki JSON z dan
 
 ## Uruchomienie
 
-Wymagany jest Node.js 18 lub nowszy. Serwer nie wymaga zewnętrznych pakietów.
+Wymagany jest Node.js 18 lub nowszy. Serwer nie wymaga zewnętrznych pakietów. Konfiguracja jest ładowana z `.env`; skopiuj `.env.example` do `.env` i dostosuj potrzebne wartości.
 
 ```sh
 npm start
 ```
 
-Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić zmiennymi `PORT` i `HOST`.
+Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić przez `PORT` i `HOST`.
 
 ## Endpointy
 
@@ -19,11 +19,11 @@ Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić zmiennymi
 - `GET /api/schedule?group=WCY23IB4aS6&semester=20261` — plik ICS grupy dla semestru o ID `20261`.
 - `GET /api/options` — listy grup i semestrów dla formularza.
 
-Endpointy `/api/*` mają limit 60 żądań na minutę na adres IP. Po przekroczeniu serwer zwraca `429 Too Many Requests` i nagłówek `Retry-After`. Limit można zmienić przez `RATE_LIMIT_MAX_REQUESTS` i `RATE_LIMIT_WINDOW_MS` (wartości domyślne: `60` i `60000`).
+Endpointy `/api/*` mają domyślnie limit 60 żądań na minutę na adres IP. Po przekroczeniu serwer zwraca `429 Too Many Requests` i nagłówek `Retry-After`. Limit można zmienić przez `RATE_LIMIT_MAX_REQUESTS` i `RATE_LIMIT_WINDOW_MS`.
 
 Identyfikatory i nazwy semestrów pochodzą z `semesters.json`. Przykładowo `20261` oznacza semestr zimowy roku akademickiego 2026/2027, a `20262` — letni.
 
-Źródłem danych jest `/data/semesters.json` oraz pliki `entries-{id}.json` i `subjects-{id}.json` pod `DATA_BASE_URL`. Domyślna wartość to `https://watplan.coobie.dev/data`; można ją zmienić w konfiguracji środowiska.
+Źródłem danych jest `/data/semesters.json` oraz pliki `entries-{id}.json` i `subjects-{id}.json` pod `DATA_BASE_URL`. Formularz korzysta z adresów `/api/options` i `/api/schedule`; jeśli API działa pod innym adresem niż strona, ustaw jego bazę w `PUBLIC_API_BASE_URL`.
 
 Serwer synchronizuje wszystkie semestry i tworzy kalendarz na podstawie wpisów z JSON-a danego semestru dla każdej znalezionej grupy. Endpoint zwraca gotowy plik z katalogu `./data/ics` — nie pobiera danych podczas żądania. Podczas pierwszej synchronizacji odpowiedź może mieć status `503`; po wygenerowaniu pliku odpowiedź ma typ `text/calendar` i nazwę `{grupa}-{id-semestru}.ics`.
 

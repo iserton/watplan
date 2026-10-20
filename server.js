@@ -1,12 +1,30 @@
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const projectDirectory = dirname(fileURLToPath(import.meta.url));
+try {
+  const envFile = readFileSync(join(projectDirectory, '.env'), 'utf8');
+  for (const line of envFile.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match || match[1] in process.env) continue;
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+      value = value.slice(1, -1);
+    process.env[match[1]] = value;
+  }
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
 const dataBaseUrl = (process.env.DATA_BASE_URL ?? 'https://watplan.coobie.dev/data').replace(/\/$/, '');
 const calendarDirectory = process.env.CALENDAR_DIRECTORY ?? './data/ics';
+const publicApiBaseUrl = (process.env.PUBLIC_API_BASE_URL ?? '').replace(/\/+$/, '');
 const syncIntervalMs = 15 * 60 * 1000;
 const fileTtlMs = 15 * 60 * 1000;
 const rateLimitWindowMs = positiveInteger(process.env.RATE_LIMIT_WINDOW_MS, 60_000);
@@ -58,6 +76,8 @@ const homePage = `<!doctype html>
     <p id="status" role="status">Pobieram listę grup i semestrów…</p>
   </main>
   <script>
+    const apiBaseUrl = ${JSON.stringify(publicApiBaseUrl)};
+    const apiUrl = (path) => new URL(path, apiBaseUrl || window.location.origin);
     const groupSelect = document.querySelector('#group');
     const semesterSelect = document.querySelector('#semester');
     const copyButton = document.querySelector('#copy');
@@ -69,7 +89,7 @@ const homePage = `<!doctype html>
 
     function updateLink() {
       if (!groupSelect.value || !semesterSelect.value) return;
-      const url = new URL('/api/schedule', window.location.origin);
+      const url = apiUrl('/api/schedule');
       url.searchParams.set('group', groupSelect.value);
       url.searchParams.set('semester', semesterSelect.value);
       calendarLink = url.href;
@@ -105,7 +125,7 @@ const homePage = `<!doctype html>
 
     async function loadOptions() {
       try {
-        const response = await fetch('/api/options');
+        const response = await fetch(apiUrl('/api/options'));
         if (!response.ok) throw new Error('Lista jest jeszcze synchronizowana.');
         const options = await response.json();
         groupSelect.replaceChildren(new Option('Wszystkie grupy', 'ALL'));

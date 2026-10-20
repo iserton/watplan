@@ -215,7 +215,7 @@ function typeMarker(type) {
   })[type] ?? type ?? '';
 }
 
-function makeEvent(group, entry, subject, includeGroup = false) {
+function makeEvent(group, entry, subject) {
   const start = eventDateTime(entry.date, entry.timeStart);
   const end = eventDateTime(entry.date, entry.timeEnd);
   if (!start || !end) return undefined;
@@ -229,9 +229,8 @@ function makeEvent(group, entry, subject, includeGroup = false) {
     `Rodzaj zajęć: ${entry.type ?? ''}`,
     entry.num !== undefined && `Nr zajęć: ${entry.num}${subject?.numH !== undefined ? `/${subject.numH}` : ''}`,
     `Prowadzący: ${entry.prof ?? subject?.prof ?? ''}`,
-    includeGroup && `Grupa: ${group}`,
   ].filter(Boolean).join('\n');
-  const summary = `${includeGroup ? `${group}: ` : ''}${subject?.short || entry.title || 'Zajęcia'} (${typeMarker(entry.type)})`;
+  const summary = `${subject?.short || entry.title || 'Zajęcia'} (${typeMarker(entry.type)})`;
 
   return [
     'BEGIN:VEVENT',
@@ -249,9 +248,7 @@ function makeEvent(group, entry, subject, includeGroup = false) {
 
 function makeCalendar(group, semester, entries, subjects) {
   const events = entries
-    .map((item) => group === 'ALL'
-      ? makeEvent(item.sourceGroup, item.entry, findSubject(subjects[item.sourceGroup], item.entry), true)
-      : makeEvent(group, item, findSubject(subjects, item)))
+    .map((entry) => makeEvent(group, entry, findSubject(subjects, entry)))
     .filter(Boolean);
   const header = [
     'BEGIN:VCALENDAR',
@@ -259,7 +256,7 @@ function makeCalendar(group, semester, entries, subjects) {
     'PRODID:-//WATplan//Schedule//PL',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:${escapeIcs(`${group === 'ALL' ? 'Wszystkie grupy' : group} ${semester.name}`)}`,
+    `X-WR-CALNAME:${escapeIcs(`${group} ${semester.name}`)}`,
     'X-WR-TIMEZONE:Europe/Warsaw',
     'BEGIN:VTIMEZONE',
     'TZID:Europe/Warsaw',
@@ -307,10 +304,12 @@ async function fetchJson(path) {
 
 async function pruneExpiredFiles() {
   const files = await readdir(calendarDirectory, { withFileTypes: true });
-  await Promise.all(files.filter((file) => file.isFile() && file.name.endsWith('.ics')).map(async (file) => {
+  await Promise.all(files.filter((file) => file.isFile()
+    && (file.name.endsWith('.ics') || /^ALL-\d{5}\.ics\.tmp$/.test(file.name))).map(async (file) => {
     const path = join(calendarDirectory, file.name);
     try {
-      if (Date.now() - (await stat(path)).mtimeMs >= fileTtlMs) await unlink(path);
+      if (/^ALL-\d{5}\.ics$/.test(file.name) || Date.now() - (await stat(path)).mtimeMs >= fileTtlMs)
+        await unlink(path);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -341,8 +340,6 @@ async function syncCalendars() {
     const sortedGroups = [...groups].filter(validGroup).sort();
     for (const { semester, entries, subjects } of semesterData) {
       const semesterGroups = new Set([...Object.keys(entries), ...Object.keys(subjects)]);
-      const allEntries = [...semesterGroups].filter(validGroup).flatMap((group) => (entries[group] ?? [])
-        .map((entry) => ({ sourceGroup: group, entry })));
       for (const group of semesterGroups) {
         if (!validGroup(group)) continue;
         const fileName = calendarFileName(group, semester.id);
@@ -352,11 +349,6 @@ async function syncCalendars() {
         await rename(temporaryPath, path);
         generated++;
       }
-      const allGroupsPath = join(calendarDirectory, calendarFileName('ALL', semester.id));
-      const allGroupsTempPath = `${allGroupsPath}.tmp`;
-      await writeFile(allGroupsTempPath, makeCalendar('ALL', semester, allEntries, subjects), 'utf8');
-      await rename(allGroupsTempPath, allGroupsPath);
-      generated++;
     }
 
     catalogGroups = sortedGroups;
@@ -393,7 +385,7 @@ const server = createServer(async (request, response) => {
 
   const group = url.searchParams.get('group') ?? '';
   const semesterId = url.searchParams.get('semester') ?? '';
-  if (group !== 'ALL' && !validGroup(group)) return json(response, 400, { error: 'Valid WCY group is required' });
+  if (!validGroup(group)) return json(response, 400, { error: 'Valid WCY group is required' });
   if (!/^\d{5}$/.test(semesterId)) return json(response, 400, { error: 'A five-digit semester ID is required' });
 
   const path = join(calendarDirectory, calendarFileName(group, semesterId));

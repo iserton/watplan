@@ -17,7 +17,6 @@ Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić zmiennymi
 - `GET /` — formularz wyboru grupy i semestru oraz kopiowania linku.
 - `GET /health` — status serwera w JSON.
 - `GET /api/schedule?group=WCY23IB4aS6&semester=20261` — plik ICS grupy dla semestru o ID `20261`.
-- `GET /api/schedule?group=ALL&semester=20261` — wspólny kalendarz dla wszystkich grup.
 - `GET /api/options` — listy grup i semestrów dla formularza.
 
 Identyfikatory i nazwy semestrów pochodzą z `semesters.json`. Przykładowo `20261` oznacza semestr zimowy roku akademickiego 2026/2027, a `20262` — letni.

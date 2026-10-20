@@ -276,15 +276,14 @@ function typeMarker(type) {
   })[type] ?? type ?? '';
 }
 
-function makeEvent(group, entry, subject) {
+function makeEvent(group, entry, subject, identity) {
   const start = eventDateTime(entry.date, entry.timeStart);
   const end = eventDateTime(entry.date, entry.timeEnd);
   if (!start || !end) return undefined;
 
-  const eventHash = entry.hash || createHash('sha256')
-    .update(`${start}|${entry.title ?? ''}|${entry.num ?? ''}`)
+  const uid = createHash('sha256')
+    .update(`${group}|${identity}`)
     .digest('hex');
-  const uid = `${group}-${eventHash}-${start}`;
   const description = [
     entry.title,
     `Rodzaj zajęć: ${entry.type ?? ''}`,
@@ -333,20 +332,18 @@ function makeCalendar(group, semester, entries, subjects) {
     if (!identity) continue;
     let grouped = groupedEvents.get(identity);
     if (!grouped) {
-      grouped = { entry, subject, professors: new Set(), hashes: new Set() };
+      grouped = { entry, subject, professors: new Set() };
       groupedEvents.set(identity, grouped);
     }
     const professor = String(entry.prof ?? subject?.prof ?? '').trim().replace(/\s+/g, ' ');
     if (professor) grouped.professors.add(professor);
-    if (entry.hash) grouped.hashes.add(entry.hash);
   }
-  const events = [...groupedEvents.values()].flatMap((grouped) => {
+  const events = [...groupedEvents].flatMap(([identity, grouped]) => {
     const entry = {
       ...grouped.entry,
-      hash: [...grouped.hashes].sort()[0] ?? grouped.entry.hash,
       prof: [...grouped.professors].join(', ') || grouped.entry.prof,
     };
-    const event = makeEvent(group, entry, grouped.subject);
+    const event = makeEvent(group, entry, grouped.subject, identity);
     return event ? [event] : [];
   });
   const header = [

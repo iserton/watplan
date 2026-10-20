@@ -128,7 +128,30 @@ function eventDateTime(date, time) {
   return `${day}T${clock}00`;
 }
 
-function makeEvent(group, entry, includeGroup = false) {
+function findSubject(subjects, entry) {
+  const matches = (subjects ?? []).filter((subject) =>
+    subject.title === entry.title && subject.type === entry.type);
+  if (matches.length === 0) return undefined;
+  if (entry.prof) return matches.find((subject) => subject.prof === entry.prof) ?? matches[0];
+  return matches[0];
+}
+
+function typeMarker(type) {
+  return ({
+    'Wykład': 'W',
+    'Ćwiczenia': 'Ć',
+    'Laboratorium': 'L',
+    'Projekt': 'P',
+    'Seminarium': 'S',
+    'Praktyka': 'Pr',
+    'Egzamin': 'E',
+    'Egzamin poprawkowy': 'E',
+    'Zaliczenie': 'Z',
+    'Zaliczenie poprawkowe': 'Z',
+  })[type] ?? type ?? '';
+}
+
+function makeEvent(group, entry, subject, includeGroup = false) {
   const start = eventDateTime(entry.date, entry.timeStart);
   const end = eventDateTime(entry.date, entry.timeEnd);
   if (!start || !end) return undefined;
@@ -137,12 +160,13 @@ function makeEvent(group, entry, includeGroup = false) {
     .update(`${group}|${start}|${entry.title ?? ''}|${entry.num ?? ''}`)
     .digest('hex');
   const description = [
-    entry.type,
-    includeGroup && `Grupa planu: ${group}`,
-    entry.prof && `Prowadzący: ${entry.prof}`,
-    entry.group && `Grupa: ${entry.group}`,
-    entry.num !== undefined && `Numer zajęć: ${entry.num}`,
+    entry.title,
+    `Rodzaj zajęć: ${entry.type ?? ''}`,
+    entry.num !== undefined && `Nr zajęć: ${entry.num}${subject?.numH !== undefined ? `/${subject.numH}` : ''}`,
+    `Prowadzący: ${entry.prof ?? subject?.prof ?? ''}`,
+    includeGroup && `Grupa: ${group}`,
   ].filter(Boolean).join('\n');
+  const summary = `${includeGroup ? `${group}: ` : ''}${subject?.short || entry.title || 'Zajęcia'} (${typeMarker(entry.type)})`;
 
   return [
     'BEGIN:VEVENT',
@@ -150,18 +174,19 @@ function makeEvent(group, entry, includeGroup = false) {
     `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`,
     `DTSTART;TZID=Europe/Warsaw:${start}`,
     `DTEND;TZID=Europe/Warsaw:${end}`,
-    `SUMMARY:${escapeIcs(`${includeGroup ? `${group}: ` : ''}${entry.title || 'Zajęcia'}`)}`,
+    `SUMMARY:${escapeIcs(summary)}`,
     ...(entry.room?.length ? [`LOCATION:${escapeIcs(entry.room.join(', '))}`] : []),
     ...(description ? [`DESCRIPTION:${escapeIcs(description)}`] : []),
+    `CATEGORIES:${escapeIcs(entry.type)},${escapeIcs(entry.title)}`,
     'END:VEVENT',
   ].join('\r\n');
 }
 
-function makeCalendar(group, semester, entries) {
+function makeCalendar(group, semester, entries, subjects) {
   const events = entries
     .map((item) => group === 'ALL'
-      ? makeEvent(item.sourceGroup, item.entry, true)
-      : makeEvent(group, item))
+      ? makeEvent(item.sourceGroup, item.entry, findSubject(subjects[item.sourceGroup], item.entry), true)
+      : makeEvent(group, item, findSubject(subjects, item)))
     .filter(Boolean);
   return [
     'BEGIN:VCALENDAR',
@@ -256,13 +281,13 @@ async function syncCalendars() {
         const fileName = calendarFileName(group, semester.id);
         const path = join(calendarDirectory, fileName);
         const temporaryPath = `${path}.tmp`;
-        await writeFile(temporaryPath, makeCalendar(group, semester, entries[group] ?? []), 'utf8');
+        await writeFile(temporaryPath, makeCalendar(group, semester, entries[group] ?? [], subjects[group] ?? []), 'utf8');
         await rename(temporaryPath, path);
         generated++;
       }
       const allGroupsPath = join(calendarDirectory, calendarFileName('ALL', semester.id));
       const allGroupsTempPath = `${allGroupsPath}.tmp`;
-      await writeFile(allGroupsTempPath, makeCalendar('ALL', semester, allEntries), 'utf8');
+      await writeFile(allGroupsTempPath, makeCalendar('ALL', semester, allEntries, subjects), 'utf8');
       await rename(allGroupsTempPath, allGroupsPath);
       generated++;
     }

@@ -307,10 +307,35 @@ function makeEvent(group, entry, subject) {
   ].flatMap(foldIcsLine).join('\r\n');
 }
 
+function eventIdentity(entry, subject) {
+  const start = eventDateTime(entry.date, entry.timeStart);
+  const end = eventDateTime(entry.date, entry.timeEnd);
+  if (!start || !end) return undefined;
+  return JSON.stringify([
+    start,
+    end,
+    subject?.short || entry.title || 'Zajęcia',
+    typeMarker(entry.type),
+    entry.title ?? '',
+    entry.type ?? '',
+    entry.num !== undefined,
+    entry.num ?? null,
+    entry.num !== undefined ? subject?.numH ?? null : null,
+    entry.prof ?? subject?.prof ?? '',
+    entry.room?.length ? entry.room.join(', ') : '',
+  ]);
+}
+
 function makeCalendar(group, semester, entries, subjects) {
-  const events = entries
-    .map((entry) => makeEvent(group, entry, findSubject(subjects, entry)))
-    .filter(Boolean);
+  const seenEvents = new Set();
+  const events = entries.flatMap((entry) => {
+    const subject = findSubject(subjects, entry);
+    const identity = eventIdentity(entry, subject);
+    if (!identity || seenEvents.has(identity)) return [];
+    seenEvents.add(identity);
+    const event = makeEvent(group, entry, subject);
+    return event ? [event] : [];
+  });
   const header = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',

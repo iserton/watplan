@@ -1,40 +1,30 @@
-# WATplan
+# WATplan Server
 
-Prosta aplikacja PWA służąca do wyświetlania planu zajęć pobieranego ze strony WCY WAT.
+Serwer z prostą stroną wyboru kalendarza. Co 15 minut pobiera pliki JSON z danymi wszystkich semestrów, generuje osobny plik ICS dla każdej grupy i semestru oraz zapisuje je lokalnie na 15 minut.
 
-[https://watplan.coobie.dev](https://watplan.coobie.dev)
+## Uruchomienie
 
-## Instrukcja obsługi
+Wymagany jest Node.js 18 lub nowszy. Serwer nie wymaga zewnętrznych pakietów. Konfiguracja jest ładowana z `.env`; skopiuj `.env.example` do `.env` i dostosuj potrzebne wartości.
 
-- **Ustaw swoją grupę w ustawieniach, aby wszystkie funkcje prawidłowo działały**
-- Wybierz dzień w bieżącym tygodniu, klikając na datę w górnym pasku.
-- Przesuwaj w lewo/w prawo daty w górnym pasku, aby zmienić tydzień.
-- Przesuwaj w lewo/w prawo w harmonogramie, aby zmienić dzień/miesiąc.
-- Kliknij kalendarz w prawym górnym rogu, aby wybrać konkretną datę.
-- Tutaj możesz również zmienić typ widoku:
-  - Dzień - wyświetla plan dla wybranego dnia.
-    - Bieżący okres jest podświetlony na zielono, przerwa między okresami jest podświetlona na żółto.
-    - Bieżący wykład ma pasek postępu z pozostałym czasem.
-    - Podwójne kliknięcie na wykładzie umożliwia przeglądanie szczegółów i filtrowanie widoku miesiąca według tego wykładu.
-  - Miesiąc - wyświetla plan dla wybranego miesiąca.
-    - Bieżący dzień jest podświetlony na zielono.
-    - Kliknij na dzień, aby rozwinąć szczegóły.
-    - Podwójne kliknięcie, aby zobaczyć wybrany dzień w widoku Dnia.
-  - Tydzień - wyświetla plan dla wybranego tygodnia.
-    - Domyślny widok na dużych urządzeniach.
-    - Dostępny na mniejszych urządzeniach, jeśli jest wymuszony w ustawieniach.
-    - Funkcje są podobne do tych w widoku dnia.
-- Możesz zainstalować tę aplikację na swoim telefonie i korzystać z niej offline - szukaj opcji "Zainstaluj" w swojej przeglądarce.
-- Możesz dodawać notatki do wpisów - dotknij/kliknij dwukrotnie aby wyświetlić szczegóły, i przy pomocy przycisku + dodaj notatki.
-- Możesz wyszukiwać przedmioty:
-  - W widoku szczegółów, wybierz "Wyszukaj przedmiot".
-  - W widoku miesiąca, wybierz przycisk z lupą.
-  - Na pasku wyszukiwania możesz zmienić przedmiot oraz rodzaj zajęć.
-- Możesz znaleźć przedmioty o tym samym numerze zajęć w innych grupach - w widoku szczeółów wybierz "Znajdź w innych grupach".
-  - Podwójne dotknięcie/kliknięcie otwiera widok dnia dla grupy i dnia wybranych zajęć.
-- Możesz przenieść przedmiot innej grupy na swój plan - w widoku szczegółów wybierz "Dodaj do swojego planu".
-- Możesz przypiąć grupę na liście aby mieć do niej łatwiejszy dostęp. Aby przypiąć/odpiąć wybierz grupę, a następnie przytrzymaj/kliknij PPM na napis "Grupa: WCY...".
+```sh
+npm start
+```
 
----
+Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić przez `PORT` i `HOST`.
 
-Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## Endpointy
+
+- `GET /` — formularz wyboru grupy i semestru oraz kopiowania linku.
+- `GET /health` — status serwera w JSON.
+- `GET /api/schedule?group=WCY23IB4aS6&semester=20261` — plik ICS grupy dla semestru o ID `20261`.
+- `GET /api/options` — listy grup i semestrów dla formularza.
+
+Endpointy `/api/*` mają domyślnie limit 60 żądań na minutę na adres IP. Po przekroczeniu serwer zwraca `429 Too Many Requests` i nagłówek `Retry-After`. Limit można zmienić przez `RATE_LIMIT_MAX_REQUESTS` i `RATE_LIMIT_WINDOW_MS`.
+
+Identyfikatory i nazwy semestrów pochodzą z `semesters.json`. Przykładowo `20261` oznacza semestr zimowy roku akademickiego 2026/2027, a `20262` — letni.
+
+Źródłem danych jest `/data/semesters.json` oraz pliki `entries-{id}.json` i `subjects-{id}.json` pod `DATA_BASE_URL`. Formularz korzysta z adresów `/api/options` i `/api/schedule`; jeśli API działa pod innym adresem niż strona, ustaw jego bazę w `PUBLIC_API_BASE_URL`.
+
+Serwer synchronizuje wszystkie semestry i tworzy kalendarz na podstawie wpisów z JSON-a danego semestru dla każdej znalezionej grupy. Endpoint zwraca gotowy plik z katalogu `./data/ics` — nie pobiera danych podczas żądania. Podczas pierwszej synchronizacji odpowiedź może mieć status `503`; po wygenerowaniu pliku odpowiedź ma typ `text/calendar` i nazwę `{grupa}-{id-semestru}.ics`.
+
+`CALENDAR_DIRECTORY` pozwala zmienić katalog plików, a `PORT` i `HOST` adres nasłuchiwania. Katalog z wygenerowanymi kalendarzami powinien być trwałym zapisem na serwerze.

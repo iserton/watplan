@@ -8,6 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.env
+.env.*
+!.env.example
 dist
 dist-ssr
 *.local
@@ -26,6 +29,7 @@ dist-ssr
 #custom files
 watplan-icon.ai
 public/data
+data/ics
 
 .yarn/*
 !.yarn/cache

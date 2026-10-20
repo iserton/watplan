@@ -163,6 +163,24 @@ function escapeIcs(value) {
     .replace(/,/g, '\\,');
 }
 
+function foldIcsLine(line) {
+  const physicalLines = [];
+  let current = '';
+  let byteLength = 0;
+  for (const character of line) {
+    const characterLength = Buffer.byteLength(character);
+    if (byteLength + characterLength > 75) {
+      physicalLines.push(current);
+      current = ' ';
+      byteLength = 1;
+    }
+    current += character;
+    byteLength += characterLength;
+  }
+  physicalLines.push(current);
+  return physicalLines;
+}
+
 function compactDate(date) {
   return String(date ?? '').replaceAll('_', '').replaceAll('-', '');
 }
@@ -202,9 +220,10 @@ function makeEvent(group, entry, subject, includeGroup = false) {
   const end = eventDateTime(entry.date, entry.timeEnd);
   if (!start || !end) return undefined;
 
-  const uid = entry.hash || createHash('sha256')
-    .update(`${group}|${start}|${entry.title ?? ''}|${entry.num ?? ''}`)
+  const eventHash = entry.hash || createHash('sha256')
+    .update(`${start}|${entry.title ?? ''}|${entry.num ?? ''}`)
     .digest('hex');
+  const uid = `${group}-${eventHash}-${start}`;
   const description = [
     entry.title,
     `Rodzaj zajęć: ${entry.type ?? ''}`,
@@ -225,7 +244,7 @@ function makeEvent(group, entry, subject, includeGroup = false) {
     ...(description ? [`DESCRIPTION:${escapeIcs(description)}`] : []),
     `CATEGORIES:${escapeIcs(entry.type)},${escapeIcs(entry.title)}`,
     'END:VEVENT',
-  ].join('\r\n');
+  ].flatMap(foldIcsLine).join('\r\n');
 }
 
 function makeCalendar(group, semester, entries, subjects) {
@@ -234,7 +253,7 @@ function makeCalendar(group, semester, entries, subjects) {
       ? makeEvent(item.sourceGroup, item.entry, findSubject(subjects[item.sourceGroup], item.entry), true)
       : makeEvent(group, item, findSubject(subjects, item)))
     .filter(Boolean);
-  return [
+  const header = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     'PRODID:-//WATplan//Schedule//PL',
@@ -260,9 +279,11 @@ function makeCalendar(group, semester, entries, subjects) {
     'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
     'END:STANDARD',
     'END:VTIMEZONE',
+  ];
+  return [
+    ...header.flatMap(foldIcsLine),
     ...events,
-    'END:VCALENDAR',
-    '',
+    ...['END:VCALENDAR', ''].flatMap(foldIcsLine),
   ].join('\r\n');
 }
 

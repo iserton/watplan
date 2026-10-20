@@ -128,8 +128,7 @@ const homePage = `<!doctype html>
         const response = await fetch(apiUrl('/api/options'));
         if (!response.ok) throw new Error('Lista jest jeszcze synchronizowana.');
         const options = await response.json();
-        groupSelect.replaceChildren(new Option('Wszystkie grupy', 'ALL'));
-        options.groups.forEach((group) => groupSelect.add(new Option(group, group)));
+        groupSelect.replaceChildren(...options.groups.map((group) => new Option(group, group)));
         semesterSelect.replaceChildren(...options.semesters.map((semester) => new Option(semester.name, semester.id)));
         groupSelect.disabled = false;
         semesterSelect.disabled = false;

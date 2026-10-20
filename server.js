@@ -24,9 +24,11 @@ const homePage = `<!doctype html>
     main { max-width: 34rem; margin: 3rem auto; padding: 1.5rem; background: white; border: 1px solid #d9e0e3; border-radius: 10px; }
     h1 { margin-top: 0; font-size: 1.5rem; }
     label { display: block; margin: 1rem 0 .35rem; font-weight: 600; }
-    select, input, button { box-sizing: border-box; width: 100%; min-height: 2.8rem; padding: .6rem; font: inherit; }
-    input { margin: .75rem 0; }
-    button { color: white; background: #207b67; border: 0; border-radius: 5px; cursor: pointer; }
+    select { box-sizing: border-box; width: 100%; min-height: 2.8rem; padding: .6rem; font: inherit; }
+    .actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+    button { display: grid; place-items: center; width: 2.8rem; height: 2.8rem; padding: .55rem; color: white; background: #207b67; border: 0; border-radius: 5px; cursor: pointer; }
+    button svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    button svg[hidden] { display: none; }
     button:disabled { opacity: .55; cursor: wait; }
     #status { min-height: 1.5rem; color: #535b60; }
   </style>
@@ -38,23 +40,30 @@ const homePage = `<!doctype html>
     <select id="group" disabled><option>Ładowanie grup…</option></select>
     <label for="semester">Semestr</label>
     <select id="semester" disabled><option>Ładowanie semestrów…</option></select>
-    <input id="link" aria-label="Link do kalendarza" readonly>
-    <button id="copy" disabled>Kopiuj link</button>
+    <div class="actions">
+      <button id="copy" type="button" aria-label="Kopiuj link" title="Kopiuj link" disabled>
+        <svg id="copyIcon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path></svg>
+        <svg id="checkIcon" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m5 12 4 4L19 6"></path></svg>
+      </button>
+    </div>
     <p id="status" role="status">Pobieram listę grup i semestrów…</p>
   </main>
   <script>
     const groupSelect = document.querySelector('#group');
     const semesterSelect = document.querySelector('#semester');
-    const linkInput = document.querySelector('#link');
     const copyButton = document.querySelector('#copy');
+    const copyIcon = document.querySelector('#copyIcon');
+    const checkIcon = document.querySelector('#checkIcon');
     const status = document.querySelector('#status');
+    let calendarLink = '';
+    let resetIconTimer;
 
     function updateLink() {
       if (!groupSelect.value || !semesterSelect.value) return;
       const url = new URL('/api/schedule', window.location.origin);
       url.searchParams.set('group', groupSelect.value);
       url.searchParams.set('semester', semesterSelect.value);
-      linkInput.value = url.href;
+      calendarLink = url.href;
       copyButton.disabled = false;
     }
 
@@ -81,12 +90,22 @@ const homePage = `<!doctype html>
     semesterSelect.addEventListener('change', updateLink);
     copyButton.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(linkInput.value);
-      } catch {
-        linkInput.select();
-        document.execCommand('copy');
+        await navigator.clipboard.writeText(calendarLink);
+        copyIcon.hidden = true;
+        checkIcon.hidden = false;
+        copyButton.setAttribute('aria-label', 'Link skopiowany');
+        copyButton.title = 'Link skopiowany';
+        clearTimeout(resetIconTimer);
+        resetIconTimer = setTimeout(() => {
+          copyIcon.hidden = false;
+          checkIcon.hidden = true;
+          copyButton.setAttribute('aria-label', 'Kopiuj link');
+          copyButton.title = 'Kopiuj link';
+        }, 1500);
+        status.textContent = 'Link skopiowany.';
+      } catch (error) {
+        status.textContent = error.message || 'Nie udało się skopiować linku.';
       }
-      status.textContent = 'Link skopiowany.';
     });
     loadOptions();
   </script>

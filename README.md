@@ -19,6 +19,8 @@ Domyślnie nasłuchuje na `0.0.0.0:3000`. Port i adres można zmienić zmiennymi
 - `GET /api/schedule?group=WCY23IB4aS6&semester=20261` — plik ICS grupy dla semestru o ID `20261`.
 - `GET /api/options` — listy grup i semestrów dla formularza.
 
+Endpointy `/api/*` mają limit 60 żądań na minutę na adres IP. Po przekroczeniu serwer zwraca `429 Too Many Requests` i nagłówek `Retry-After`. Limit można zmienić przez `RATE_LIMIT_MAX_REQUESTS` i `RATE_LIMIT_WINDOW_MS` (wartości domyślne: `60` i `60000`).
+
 Identyfikatory i nazwy semestrów pochodzą z `semesters.json`. Przykładowo `20261` oznacza semestr zimowy roku akademickiego 2026/2027, a `20262` — letni.
 
 Źródłem danych jest `/data/semesters.json` oraz pliki `entries-{id}.json` i `subjects-{id}.json` pod `DATA_BASE_URL`. Domyślna wartość to `https://watplan.coobie.dev/data`; można ją zmienić w konfiguracji środowiska.

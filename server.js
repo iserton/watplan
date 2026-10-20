@@ -9,9 +9,18 @@ const dataBaseUrl = (process.env.DATA_BASE_URL ?? 'https://watplan.coobie.dev/da
 const calendarDirectory = process.env.CALENDAR_DIRECTORY ?? './data/ics';
 const syncIntervalMs = 15 * 60 * 1000;
 const fileTtlMs = 15 * 60 * 1000;
+const rateLimitWindowMs = positiveInteger(process.env.RATE_LIMIT_WINDOW_MS, 60_000);
+const rateLimitMaxRequests = positiveInteger(process.env.RATE_LIMIT_MAX_REQUESTS, 60);
+const rateLimitBuckets = new Map();
+const maxRateLimitBuckets = 50_000;
 let syncInProgress;
 let catalogGroups = [];
 let catalogSemesters = [];
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 const homePage = `<!doctype html>
 <html lang="pl">
@@ -145,6 +154,39 @@ function json(response, status, body) {
     'cache-control': 'no-store',
   });
   response.end(JSON.stringify(body));
+}
+
+function allowApiRequest(request, response) {
+  const now = Date.now();
+  const ip = (request.socket.remoteAddress ?? 'unknown').replace(/^::ffff:/, '');
+  let bucket = rateLimitBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + rateLimitWindowMs };
+    rateLimitBuckets.set(ip, bucket);
+  }
+
+  if (bucket.count >= rateLimitMaxRequests) {
+    const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    response.setHeader('retry-after', String(retryAfter));
+    response.setHeader('x-ratelimit-limit', String(rateLimitMaxRequests));
+    response.setHeader('x-ratelimit-remaining', '0');
+    response.setHeader('x-ratelimit-reset', String(Math.ceil(bucket.resetAt / 1000)));
+    json(response, 429, { error: 'Too many requests. Try again later.' });
+    return false;
+  }
+
+  bucket.count++;
+  response.setHeader('x-ratelimit-limit', String(rateLimitMaxRequests));
+  response.setHeader('x-ratelimit-remaining', String(rateLimitMaxRequests - bucket.count));
+  response.setHeader('x-ratelimit-reset', String(Math.ceil(bucket.resetAt / 1000)));
+  if (rateLimitBuckets.size > maxRateLimitBuckets) {
+    for (const [key, value] of rateLimitBuckets) {
+      if (now >= value.resetAt) rateLimitBuckets.delete(key);
+    }
+    if (rateLimitBuckets.size > maxRateLimitBuckets)
+      rateLimitBuckets.delete(rateLimitBuckets.keys().next().value);
+  }
+  return true;
 }
 
 function validGroup(group) {
@@ -366,6 +408,7 @@ const server = createServer(async (request, response) => {
     response.setHeader('allow', 'GET');
     return json(response, 405, { error: 'Method not allowed' });
   }
+  if (url.pathname.startsWith('/api/') && !allowApiRequest(request, response)) return;
   if (url.pathname === '/') {
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',

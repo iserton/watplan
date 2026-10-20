@@ -67,6 +67,33 @@ const homePage = `<!doctype html>
       copyButton.disabled = false;
     }
 
+    async function copyToClipboard(text) {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch {}
+      }
+
+      const temporaryInput = document.createElement('textarea');
+      temporaryInput.value = text;
+      temporaryInput.setAttribute('readonly', '');
+      temporaryInput.setAttribute('aria-hidden', 'true');
+      temporaryInput.style.position = 'fixed';
+      temporaryInput.style.left = '-10000px';
+      temporaryInput.style.top = '0';
+      temporaryInput.style.width = '1px';
+      temporaryInput.style.height = '1px';
+      temporaryInput.style.opacity = '0';
+      document.body.append(temporaryInput);
+      temporaryInput.focus({ preventScroll: true });
+      temporaryInput.select();
+      temporaryInput.setSelectionRange(0, temporaryInput.value.length);
+      const copied = document.execCommand('copy');
+      temporaryInput.remove();
+      if (!copied) throw new Error('Nie udało się skopiować linku.');
+    }
+
     async function loadOptions() {
       try {
         const response = await fetch('/api/options');
@@ -90,7 +117,7 @@ const homePage = `<!doctype html>
     semesterSelect.addEventListener('change', updateLink);
     copyButton.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(calendarLink);
+        await copyToClipboard(calendarLink);
         copyIcon.hidden = true;
         checkIcon.hidden = false;
         copyButton.setAttribute('aria-label', 'Link skopiowany');
